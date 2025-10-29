@@ -1,0 +1,17 @@
+# Configuration stub for BioBERT clinical NER experiments
+model_name: "dmis-lab/biobert-base-cased-v1.1"
+train_file: "data/bc5cdr/train"
+validation_file: "data/bc5cdr/dev"
+test_file: "data/bc5cdr/test"
+output_dir: "models/biobert"
+num_train_epochs: 3
+learning_rate: 5.0e-5
+per_device_train_batch_size: 8
+per_device_eval_batch_size: 8
+seed: 42
+label_list:
+  - B-Chemical
+  - I-Chemical
+  - B-Disease
+  - I-Disease
+  - O

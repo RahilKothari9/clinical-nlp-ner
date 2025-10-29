@@ -1,0 +1,36 @@
+[project]
+name = "clinical-nlp-ner"
+version = "0.1.0"
+description = "Clinical named entity recognition pipeline inspired by Natural Language Processing for Smart Healthcare."
+readme = "README.md"
+requires-python = ">=3.9"
+authors = [
+  { name = "Clinical NLP Team" }
+]
+dependencies = [
+  "transformers",
+  "datasets",
+  "accelerate",
+  "seqeval",
+  "evaluate",
+  "scikit-learn",
+  "gradio",
+  "pyyaml",
+  "pydantic",
+  "torch",
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+py-modules = [
+  "data",
+  "model",
+  "train",
+  "eval",
+  "infer",
+  "app",
+]
+
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
