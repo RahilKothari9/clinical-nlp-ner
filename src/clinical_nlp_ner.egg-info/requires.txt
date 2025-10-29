@@ -1,0 +1,10 @@
+transformers
+datasets
+accelerate
+seqeval
+evaluate
+scikit-learn
+gradio
+pyyaml
+pydantic
+torch

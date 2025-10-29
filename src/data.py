@@ -6,17 +6,86 @@ import logging
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union
 
-from datasets import ClassLabel, DatasetDict, Sequence, Value, load_dataset
+from datasets import ClassLabel, Dataset, DatasetDict, Features, Sequence, Value
+from huggingface_hub import hf_hub_download
 
 LOGGER = logging.getLogger(__name__)
 
 _DATASET_ID = "tner/bc5cdr"
-_DATASET_CONFIG = "bc5cdr"
-_LABEL_LIST = ["O", "B-Chemical", "B-Disease", "I-Disease", "I-Chemical"]
-_LABEL_TO_ID = {label: idx for idx, label in enumerate(_LABEL_LIST)}
-_ID_TO_LABEL = {idx: label for label, idx in _LABEL_TO_ID.items()}
+_LABELS_FILENAME = "dataset/label.json"
+_SPLIT_FILES = {
+    "train": "dataset/train.json",
+    "validation": "dataset/valid.json",
+    "test": "dataset/test.json",
+}
 
 PathLike = Union[str, Path]
+
+
+def _download_file(
+    filename: str,
+    cache_dir: Optional[PathLike] = None,
+    local_files_only: bool = False,
+) -> Path:
+    download_kwargs = {
+        "repo_id": _DATASET_ID,
+        "filename": filename,
+        "repo_type": "dataset",
+        "local_files_only": local_files_only,
+    }
+    if cache_dir is not None:
+        download_kwargs["cache_dir"] = str(cache_dir)
+
+    path = hf_hub_download(**download_kwargs)
+    return Path(path)
+
+
+def _load_label_mappings(
+    cache_dir: Optional[PathLike] = None,
+    local_files_only: bool = False,
+) -> Tuple[List[str], Dict[str, int], Dict[int, str]]:
+    labels_path = _download_file(
+        _LABELS_FILENAME,
+        cache_dir=cache_dir,
+        local_files_only=local_files_only,
+    )
+    mapping = json.loads(labels_path.read_text(encoding="utf-8"))
+    label_to_id = {label: int(idx) for label, idx in mapping.items()}
+
+    label_list = [None] * (max(label_to_id.values()) + 1)
+    for label, idx in label_to_id.items():
+        label_list[idx] = label
+    if any(item is None for item in label_list):
+        raise ValueError("Label mapping contains gaps; unable to construct label list.")
+
+    id_to_label = {idx: label for idx, label in enumerate(label_list)}
+    return label_list, label_to_id, id_to_label
+
+
+def _load_split(
+    split_name: str,
+    file_path: Path,
+    features: Features,
+) -> Dataset:
+    records: List[Dict[str, List[Union[str, int]]]] = []
+    with file_path.open("r", encoding="utf-8") as handle:
+        for line in handle:
+            stripped = line.strip()
+            if not stripped:
+                continue
+            sample = json.loads(stripped)
+            tokens = sample.get("tokens", [])
+            labels = sample.get("tags") or sample.get("ner_tags")
+            if labels is None:
+                raise ValueError(f"Sample in {split_name} is missing label sequence.")
+            if len(tokens) != len(labels):
+                raise ValueError(
+                    f"Token/label length mismatch in {split_name}: {len(tokens)} vs {len(labels)}"
+                )
+            records.append({"tokens": tokens, "ner_tags": labels})
+
+    LOGGER.info("Loaded %s samples for split '%s'", len(records), split_name)
+    return Dataset.from_list(records, features=features)
 
 
 def load_bc5cdr(
@@ -24,24 +93,8 @@ def load_bc5cdr(
     cache_dir: Optional[PathLike] = None,
     local_files_only: bool = False,
 ) -> Tuple[DatasetDict, List[str], Dict[str, int], Dict[int, str]]:
-    """Load the BC5CDR chemical/disease NER dataset with token-level BIO tags.
+    """Load the BC5CDR chemical/disease NER dataset with token-level BIO tags."""
 
-    Parameters
-    ----------
-    label_scheme:
-        Tagging scheme to apply. Currently only "BIO" tags are supported.
-    cache_dir:
-        Optional cache directory forwarded to ``datasets.load_dataset``.
-    local_files_only:
-        If ``True`` the loader only looks for already-downloaded data.
-
-    Returns
-    -------
-    ``(dataset, label_list, label_to_id, id_to_label)`` where ``dataset`` is a
-    :class:`datasets.DatasetDict` with ``train``, ``validation``, and ``test``
-    splits containing ``tokens`` and ``ner_tags`` columns that align with
-    Hugging Face Transformers token classification expectations.
-    """
     normalized_scheme = label_scheme.upper()
     if normalized_scheme != "BIO":
         raise NotImplementedError(
@@ -50,30 +103,30 @@ def load_bc5cdr(
 
     cache_path: Optional[Path] = Path(cache_dir) if cache_dir else None
 
-    LOGGER.info(
-        "Loading BC5CDR dataset from '%s' (config=%s)...",
-        _DATASET_ID,
-        _DATASET_CONFIG,
-    )
-    dataset = load_dataset(
-        _DATASET_ID,
-        name=_DATASET_CONFIG,
-        cache_dir=str(cache_path) if cache_path else None,
+    label_list, label_to_id, id_to_label = _load_label_mappings(
+        cache_dir=cache_path,
         local_files_only=local_files_only,
     )
 
-    # Align column names with Transformers token-classification conventions.
-    if "ner_tags" not in dataset["train"].column_names:
-        dataset = dataset.rename_column("tags", "ner_tags")
+    label_feature = ClassLabel(names=list(label_list))
+    features = Features(
+        {
+            "tokens": Sequence(Value("string")),
+            "ner_tags": Sequence(label_feature),
+        }
+    )
 
-    label_feature = ClassLabel(names=_LABEL_LIST)
-    sequence_string = Sequence(Value("string"))
-    sequence_labels = Sequence(label_feature)
+    split_datasets = {}
+    for split_name, filename in _SPLIT_FILES.items():
+        split_path = _download_file(
+            filename,
+            cache_dir=cache_path,
+            local_files_only=local_files_only,
+        )
+        split_datasets[split_name] = _load_split(split_name, split_path, features)
 
-    dataset = dataset.cast_column("tokens", sequence_string)
-    dataset = dataset.cast_column("ner_tags", sequence_labels)
-
-    return dataset, list(_LABEL_LIST), dict(_LABEL_TO_ID), dict(_ID_TO_LABEL)
+    dataset_dict = DatasetDict(split_datasets)
+    return dataset_dict, list(label_list), dict(label_to_id), dict(id_to_label)
 
 
 def _save_dataset(

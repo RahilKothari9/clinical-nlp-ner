@@ -1,0 +1,23 @@
+{
+  "labels": [
+    "O",
+    "B-Chemical",
+    "B-Disease",
+    "I-Disease",
+    "I-Chemical"
+  ],
+  "label_to_id": {
+    "O": 0,
+    "B-Chemical": 1,
+    "B-Disease": 2,
+    "I-Disease": 3,
+    "I-Chemical": 4
+  },
+  "id_to_label": {
+    "0": "O",
+    "1": "B-Chemical",
+    "2": "B-Disease",
+    "3": "I-Disease",
+    "4": "I-Chemical"
+  }
+}
